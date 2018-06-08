@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+#include <ArduinoJson.h>
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 #include <LiquidCrystal_I2C.h>
@@ -19,6 +20,60 @@ int seconds = 0, minutes = 0, count, side = 5;
 long startingMillis = 0, timer[5] = {1500000, 1500000, 1500000, 1500000, 1500000}, delta[5] = {0,0,0,0,0};
 int16_t xAxis=0, yAxis=0, zAxis=0;
 byte power = 0;
+String jsonFull;
+
+String makeJSONAudio(int faceID, String audio, unsigned long frequencia){
+  const size_t bufferSize = JSON_OBJECT_SIZE(3);
+  DynamicJsonBuffer JSONbuffer(bufferSize);
+  JsonObject& JSONencoder = JSONbuffer.createObject(); 
+  
+  JSONencoder["faceID"] = faceID;
+  JSONencoder["audio"] = audio;
+  JSONencoder["frequencia"] = frequencia;
+    
+  String json;
+  JSONencoder.printTo(json);
+  return json;
+}
+
+String makeJSONActivity(int faceID, unsigned long timeStarted, unsigned long timeEnded){  
+  const size_t bufferSize = JSON_OBJECT_SIZE(3);
+  DynamicJsonBuffer JSONbuffer(bufferSize);
+  JsonObject& JSONencoder = JSONbuffer.createObject(); 
+  
+  JSONencoder["faceID"] = faceID;
+  JSONencoder["timeStarted"] = timeStarted;
+  JSONencoder["timeEnded"] = timeEnded;
+    
+  String json;
+  JSONencoder.printTo(json);
+  return json;
+}
+
+void sendJSON(String json) {
+
+//  if(WiFi.status() == WL_CONNECTED) {
+  if(WiFiMulti.run() == WL_CONNECTED ) {
+    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/pomodoroserver");
+    http.addHeader("Content-Type", "application/json");
+
+    int httpCode = http.POST(json);
+//    int httpCode = http.GET();
+    if(httpCode > 0) {
+        Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+    } else {
+        Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    Serial.println("\n\nPAYLOAD");
+    String payload = http.getString();
+    Serial.println(payload);
+
+    http.end();
+  } else{
+    Serial.println("Error in WiFi connection");
+  }
+}
     
 void setupAccel(){
   Wire.begin();
