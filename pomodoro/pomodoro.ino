@@ -5,18 +5,20 @@
 #include <ESP8266HTTPClient.h>
 #include <LiquidCrystal_I2C.h>
 
-LiquidCrystal_I2C lcd0(0x3F, 16, 2),lcd1(0x3E, 16, 2),lcd2(0x3D, 16, 2),lcd3(0x3C, 16, 2),lcd4(0x3B, 16, 2);
+LiquidCrystal_I2C lcd0(0x3F, 16, 2),lcd1(0x3A, 16, 2),lcd2(0x3D, 16, 2),lcd3(0x3C, 16, 2),lcd4(0x3B, 16, 2);
 
 ESP8266WiFiMulti WiFiMulti;
 HTTPClient http;
 
 const int MPU_addr=0x68;  // I2C address of the MPU-6050
+const int latch_addr=0x3E;  // I2C address of the PCF8574A
 
 String audio = "";
 bool recorded = false;
 int seconds = 0, minutes = 0, count, side = 5;
 long startingMillis = 0, timer[5] = {1500000, 1500000, 1500000, 1500000, 1500000}, delta[5] = {0,0,0,0,0};
 int16_t xAxis=0, yAxis=0, zAxis=0;
+byte power = 0;
     
 void setupAccel(){
   Wire.begin();
@@ -39,62 +41,22 @@ void readAccel(){
 
 void turnLcdOff(int sideNumber) {
   if(sideNumber == 0){
-    lcd1.noDisplay();
-    lcd1.noBacklight();
-    lcd2.noDisplay();
-    lcd2.noBacklight();
-    lcd3.noDisplay();
-    lcd3.noBacklight();
-    lcd4.noDisplay();
-    lcd4.noBacklight();
+    power = 0x01;
   }else if(sideNumber == 1){
-    lcd0.noDisplay();
-    lcd0.noBacklight();
-    lcd2.noDisplay();
-    lcd2.noBacklight();
-    lcd3.noDisplay();
-    lcd3.noBacklight();
-    lcd4.noDisplay();
-    lcd4.noBacklight();
+    power = 0x02;
   }else if(sideNumber == 2){
-    lcd0.noDisplay();
-    lcd0.noBacklight();
-    lcd1.noDisplay();
-    lcd1.noBacklight();
-    lcd3.noDisplay();
-    lcd3.noBacklight();
-    lcd4.noDisplay();
-    lcd4.noBacklight();
+    power = 0x04;
   }else if(sideNumber == 3){
-    lcd0.noDisplay();
-    lcd0.noBacklight();
-    lcd1.noDisplay();
-    lcd1.noBacklight();
-    lcd2.noDisplay();
-    lcd2.noBacklight();
-    lcd4.noDisplay();
-    lcd4.noBacklight();
+    power = 0x08;
   }else if(sideNumber == 4){
-    lcd0.noDisplay();
-    lcd0.noBacklight();
-    lcd1.noDisplay();
-    lcd1.noBacklight();
-    lcd2.noDisplay();
-    lcd2.noBacklight();
-    lcd3.noDisplay();
-    lcd3.noBacklight();
+    power = 0x10;
   }else{
-    lcd0.noDisplay();
-    lcd0.noBacklight();
-    lcd1.noDisplay();
-    lcd1.noBacklight();
-    lcd2.noDisplay();
-    lcd2.noBacklight();
-    lcd3.noDisplay();
-    lcd3.noBacklight();
-    lcd4.noDisplay();
-    lcd4.noBacklight();
+    power = 0x00;
   }
+
+  Wire.beginTransmission(latch_addr);
+  Wire.write(power);
+  Wire.endTransmission(false);
 }
 
 void sendAudio(int sideNumber) {
@@ -115,10 +77,16 @@ void sendAudio(int sideNumber) {
 void setup() {
   Serial.begin(115200);
   Wire.begin();
+  pinMode(D0, INPUT);
+  pinMode(D8, INPUT);
+  pinMode(D4, INPUT);
+  pinMode(D5, INPUT);
+  pinMode(D6, INPUT);
+  
   turnLcdOff(5);
 
-  WiFi.mode(WIFI_STA);
-  WiFiMulti.addAP("XXXXXX", "XXXXXXXX");
+  //WiFi.mode(WIFI_STA);
+  //WiFiMulti.addAP("XXXXXX", "XXXXXXXX");
 
   // allow reuse (if server supports it)
   http.setReuse(true);
@@ -134,10 +102,10 @@ void loop(){
       }
       side = 0;
       turnLcdOff(side);
-
-      lcd0.init();
-      lcd0.display();   // INICIALIZA O DISPLAY LCD
-      lcd0.backlight();
+      
+      lcd1.init();
+      lcd1.display();   // INICIALIZA O DISPLAY LCD
+      lcd1.backlight();
       long count = 0;
       if (millis() - startingMillis >= 1000 ) {
         delta[side] += millis() - startingMillis;
@@ -145,19 +113,29 @@ void loop(){
       }
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
-      lcd0.home();
-      lcd0.print("ATIVIDADE 0"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
-      lcd0.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
-      lcd0.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
-      
-      while(digitalRead(D0) != 1 && count < 30){
+      lcd1.home();
+      lcd1.print("ATIVIDADE 0"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd1.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
+      lcd1.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
+
+      long acquiringTime = millis();
+      while(digitalRead(D0) != 1){
+        ESP.wdtDisable();
+        
         for(byte i = 0; i < 128; i++) {
-          audio = audio + String(analogRead(A0), HEX) + ",";
+          int aux = analogRead(A0);
+          audio = audio + String(aux, HEX) + ",";
         }
+        
+        ESP.wdtEnable(1000);
         recorded = true;
         count++;
       };
-      sendAudio(side);
+      
+      //sendAudio(side);
+      int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
+      Serial.println("Hertz: " + String(frequency));
+      Serial.println(audio);
       audio = "";
       recorded = false;
     } else if (digitalRead(D8) != 1 || xAxis < 3000 && yAxis < 1000 ) {
@@ -181,14 +159,25 @@ void loop(){
       lcd1.print("ATIVIDADE 1"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd1.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd1.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
-      while(digitalRead(D8) != 1 && count < 30){
+      
+      long acquiringTime = millis();
+      while(digitalRead(D0) != 1){
+        ESP.wdtDisable();
+        
         for(byte i = 0; i < 128; i++) {
-          audio = audio + String(analogRead(A0), HEX) + ",";
+          int aux = analogRead(A0);
+          audio = audio + String(aux, HEX) + ",";
         }
+        
+        ESP.wdtEnable(1000);
         recorded = true;
         count++;
       };
-      sendAudio(side);
+      
+      //sendAudio(side);
+      int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
+      Serial.println("Hertz: " + String(frequency));
+      Serial.println(audio);
       audio = "";
       recorded = false;
       
@@ -213,14 +202,25 @@ void loop(){
       lcd4.print("ATIVIDADE 4"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd4.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd4.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
-      while(digitalRead(D4) != 1 && count < 30){
+      
+      long acquiringTime = millis();
+      while(digitalRead(D0) != 1){
+        ESP.wdtDisable();
+        
         for(byte i = 0; i < 128; i++) {
-          audio = audio + String(analogRead(A0), HEX) + ",";
+          int aux = analogRead(A0);
+          audio = audio + String(aux, HEX) + ",";
         }
+        
+        ESP.wdtEnable(1000);
         recorded = true;
         count++;
       };
-      sendAudio(side);
+      
+      //sendAudio(side);
+      int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
+      Serial.println("Hertz: " + String(frequency));
+      Serial.println(audio);
       audio = "";
       recorded = false;
       
@@ -246,16 +246,27 @@ void loop(){
       lcd3.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd3.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
       
-      while(digitalRead(D5) != 1 && count < 30){
+      long acquiringTime = millis();
+      while(digitalRead(D0) != 1){
+        ESP.wdtDisable();
+        
         for(byte i = 0; i < 128; i++) {
-          audio = audio + String(analogRead(A0), HEX) + ",";
+          int aux = analogRead(A0);
+          audio = audio + String(aux, HEX) + ",";
         }
+        
+        ESP.wdtEnable(1000);
         recorded = true;
         count++;
       };
-      sendAudio(side);
+      
+      //sendAudio(side);
+      int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
+      Serial.println("Hertz: " + String(frequency));
+      Serial.println(audio);
       audio = "";
       recorded = false;
+      
     } else if (digitalRead(D6) != 1 || zAxis > 0 && yAxis > 0) {
       if (side != 2) {
         startingMillis = millis();  
@@ -277,16 +288,28 @@ void loop(){
       lcd2.print("ATIVIDADE 2"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd2.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd2.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
-      while(digitalRead(D6) != 1 && count < 30){
+      
+      long acquiringTime = millis();
+      while(digitalRead(D0) != 1){
+        ESP.wdtDisable();
+        
         for(byte i = 0; i < 128; i++) {
-          audio = audio + String(analogRead(A0), HEX) + ",";
+          int aux = analogRead(A0);
+          audio = audio + String(aux, HEX) + ",";
         }
+        
+        ESP.wdtEnable(1000);
         recorded = true;
         count++;
       };
-      sendAudio(side);
+      
+      //sendAudio(side);
+      int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
+      Serial.println("Hertz: " + String(frequency));
+      Serial.println(audio);
       audio = "";
       recorded = false;
+      
     } else /*if ( zAxis < 0 && yAxis < 1000 )*/ {
       side = 5;
       turnLcdOff(side);  
