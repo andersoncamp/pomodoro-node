@@ -42,7 +42,7 @@ String makeJSONActivity(int faceID, unsigned long timeSpent){
   JsonObject& JSONencoder = JSONbuffer.createObject(); 
   
   JSONencoder["faceID"] = faceID;
-  JSONencoder["timeSpent"] = timeSpent;
+  JSONencoder["delta"] = timeSpent;
     
   String json;
   JSONencoder.printTo(json);
@@ -52,9 +52,11 @@ String makeJSONActivity(int faceID, unsigned long timeSpent){
 void sendJSON(String json) {
 
 //  if(WiFi.status() == WL_CONNECTED) {
-  /*if(WiFiMulti.run() == WL_CONNECTED ) {
-    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/pomodoroserver");
+  if(WiFiMulti.run() == WL_CONNECTED ) {
+
+    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/activity");
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
 
     int httpCode = http.POST(json);
 //    int httpCode = http.GET();
@@ -70,8 +72,8 @@ void sendJSON(String json) {
 
     http.end();
   } else{
-    Serial.println("Error in WiFi connection");
-  }*/
+    Serial.println("Error in WiFi connection... " + String(WiFiMulti.run()));
+  }
 }
     
 void setupAccel(){
@@ -126,8 +128,11 @@ void setup() {
   
   turnLcdOff(5);
 
+  WiFi.mode(WIFI_STA);
+  int bla = WiFiMulti.addAP("Pomodoro", "123123123");
+  Serial.println(bla);
   // allow reuse (if server supports it)
- // http.setReuse(true);
+  http.setReuse(true);
 }
  
 void loop(){
@@ -138,7 +143,7 @@ void loop(){
     
     if(digitalRead(D0) == 1 ||  xAxis > 3000 && yAxis < 3000 ){
       if (side != 0) {
-        //sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSON(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
       }
       side = 0;
@@ -180,12 +185,10 @@ void loop(){
       _audio = "";
       recorded = false;
 
-      Serial.println("we here");
-
       
     } else /*if (digitalRead(D4) == 1 || xAxis < 3000 && yAxis < 1000 ) */{
       if (side != 1) {
-        //sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSON(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
       }
       side = 1;
