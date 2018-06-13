@@ -2,11 +2,27 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
+#include <WiFiManager.h>
 
-ESP8266WiFiMulti WiFiMulti;
 HTTPClient http;
 String jsonFull;
 
+//==============================================================
+//                  WiFi
+//==============================================================
+//Inicializa a configuração de WiFi com a biblioteca WiFiManager.
+//Esse processo inicializa o NodeMcu em modo Soft-AP e permite inserir
+//um SSID e Password de uma rede de destino o qual se deseja conectar.
+//O parâmetro "ssid" representa o nome que será utilizado para criar a rede
+//WiFi do NodeMcu.
+void startWiFiConfiguration(char ssid[]){
+  WiFiManager wifiManager;
+  wifiManager.autoConnect(ssid);
+}
+
+//==============================================================
+//                  JSON
+//==============================================================
 String makeJSONAudio(int faceID, String audio, int frequencia){
   const size_t bufferSize = JSON_OBJECT_SIZE(3);
   DynamicJsonBuffer JSONbuffer(bufferSize);
@@ -40,8 +56,14 @@ JsonArray& parseStringToJSON(String json){
   return parsed;
 }
 
+//==============================================================
+//                  HTTP
+//==============================================================
+//Por enquanto os dados são sempre enviados para o usuário "cassol".
+
+//Envia um JSON de Audio para a Estação Base. Utilizar o método "makeJSONAudio" para criar o JSON.
 void sendJSONAudio(String json) {
-  if(WiFiMulti.run() == WL_CONNECTED ) {
+  if(WiFi.status() == WL_CONNECTED ) {
     http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/pomodoroserver");
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
@@ -63,8 +85,9 @@ void sendJSONAudio(String json) {
   }
 }
 
+//Envia um JSON de Activity para a Estação Base. Utilizar o método "makeJSONActivity" para criar o JSON.
 void sendJSONActivity(String json) {
-  if(WiFiMulti.run() == WL_CONNECTED ) {
+  if(WiFi.status() == WL_CONNECTED ) {
     http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/activity");
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
@@ -86,8 +109,9 @@ void sendJSONActivity(String json) {
   }
 }
 
+//Obtém as faces cadastradas no BD da Estação Base para o usuário que está logado.
 JsonArray& getFaces() { 
-  if(WiFiMulti.run() == WL_CONNECTED ) {
+  if(WiFi.status() == WL_CONNECTED ) {
     http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/userfield/faces");
     http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
 
@@ -109,29 +133,32 @@ JsonArray& getFaces() {
   }
 }
 
-void setup()
-{
-  Serial.begin(115200);
-  delay(2000);
-  Serial.println();
-
-  WiFi.mode(WIFI_STA);
-  WiFiMulti.addAP("NET_2.4GhzAP12", "617146733");
-
-  Serial.print("Connecting");
-  while (WiFiMulti.run() != WL_CONNECTED)
-  {
-    delay(1000);
-    Serial.print('.');
-  }
-
-  Serial.println("\n");
+//==============================================================
+//                  GENERAL
+//==============================================================
+void printWiFiConfiguration(){
+  Serial.println("\n=========================================");
   Serial.print("Connected to ");
   Serial.println(WiFi.SSID());
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
   Serial.println("Dados Conexão");
   WiFi.printDiag(Serial);
+  Serial.println("=========================================\n");
+}
+
+//==============================================================
+//                  SETUP
+//==============================================================
+void setup()
+{
+  Serial.begin(115200);
+  delay(2000);
+  Serial.println();
+
+  startWiFiConfiguration("SmartPomodoro");
+  printWiFiConfiguration();
+
 
 // EXEMPLO DE ENVIO DE JSON PARA AUDIO COM HTTP POST
 //  unsigned int faceID = 1;
@@ -149,11 +176,14 @@ void setup()
 
 // EXEMPLO DE COMO RECUPERAR AS FACES DO POMODORO DE UM USUÁRIO COM HTTP GET
 // As faces retornadas são do usuário que está logado
-//  JsonArray& json = getFaces();
-//  Serial.println(json.size());
-//  json.printTo(Serial);
+  JsonArray& json = getFaces();
+  Serial.println(json.size());
+  json.printTo(Serial);
 }
 
+//==============================================================
+//                     LOOP
+//==============================================================
 void loop() {
 }
 
