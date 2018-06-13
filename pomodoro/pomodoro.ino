@@ -14,10 +14,10 @@ HTTPClient http;
 const int MPU_addr=0x68;  // I2C address of the MPU-6050
 const int latch_addr=0x3E;  // I2C address of the PCF8574A
 
-String _audio = "";
+String _audio = "", activities[5];
 bool recorded = false;
 int seconds = 0, minutes = 0, count, side = 5;
-long startingMillis = 0, timer[5] = {1500000, 1500000, 1500000, 1500000, 1500000}, delta[5] = {0,0,0,0,0};
+long startingMillis = 0, timer[5] = {1500000, 15000, 1500000, 1500000, 1500000}, delta[5] = {0,0,0,0,0};
 int16_t xAxis=0, yAxis=0, zAxis=0;
 byte power = 0;
 String jsonFull;
@@ -49,17 +49,19 @@ String makeJSONActivity(int faceID, unsigned long timeSpent){
   return json;
 }
 
-void sendJSON(String json) {
+JsonArray& parseStringToJSON(String json){
+  DynamicJsonBuffer JSONbuffer;
+  JsonArray& parsed = JSONbuffer.parseArray(json);
+  return parsed;
+}
 
-//  if(WiFi.status() == WL_CONNECTED) {
+void sendJSONAudio(String json) {
   if(WiFiMulti.run() == WL_CONNECTED ) {
-
-    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/activity");
+    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/pomodoroserver");
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
 
     int httpCode = http.POST(json);
-//    int httpCode = http.GET();
     if(httpCode > 0) {
         Serial.printf("[HTTP] POST... code: %d\n", httpCode);
     } else {
@@ -72,7 +74,53 @@ void sendJSON(String json) {
 
     http.end();
   } else{
-    Serial.println("Error in WiFi connection... " + String(WiFiMulti.run()));
+    Serial.println("Error in WiFi connection");
+  }
+}
+
+void sendJSONActivity(String json) {
+  if(WiFiMulti.run() == WL_CONNECTED ) {
+    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/activity");
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
+
+    int httpCode = http.POST(json);
+    if(httpCode > 0) {
+        Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+    } else {
+        Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    Serial.println("\n\nPAYLOAD");
+    String payload = http.getString();
+    Serial.println(payload);
+
+    http.end();
+  } else{
+    Serial.println("Error in WiFi connection");
+  }
+}
+
+JsonArray& getFaces() { 
+  if(WiFiMulti.run() == WL_CONNECTED ) {
+    http.begin("http://smartpomodoro-backend2-smartpomodoro.1d35.starter-us-east-1.openshiftapps.com/api/userfield/faces");
+    http.addHeader("Authorization", "Basic Y2Fzc29sOm9maWNpbmFzMw==");
+
+    int httpCode = http.GET();
+    if(httpCode > 0) {
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+    } else {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    Serial.println("\n\nPAYLOAD");
+    String payload = http.getString();
+    Serial.println(payload);
+    http.end();
+
+    return parseStringToJSON(payload);
+  } else{
+    Serial.println("Error in WiFi connection");
   }
 }
     
@@ -93,32 +141,9 @@ void readAccel(){
   xAxis=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
   yAxis=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
   zAxis=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
-
-  Serial.println("X: " + String(xAxis) + " Y: " + String(yAxis) + " Z: " + String(zAxis));
 }
 
 void turnLcdOff(int sideNumber) {
-  /*if(sideNumber == 0){
-    power = B00000001;
-  }else if(sideNumber == 1){
-    power = B00000010;
-  }else if(sideNumber == 2){
-    power = B00000100;
-  }else if(sideNumber == 3){
-    power = B00010000;
-  }else if(sideNumber == 4){
-    power = B00100000;
-  }else{
-    power = B11111111;
-  }
-      power = B11111111;
-
-  Serial.println(power);
-
-  Wire.beginTransmission(latch_addr);
-  Wire.write(power);
-  Wire.endTransmission();*/
-
   if(sideNumber == 0){
     lcd1.noDisplay();
     lcd1.noBacklight();
@@ -186,27 +211,47 @@ void setup() {
   pinMode(D4, INPUT);
   pinMode(D5, INPUT);
   pinMode(D6, INPUT);
+  pinMode(D8, OUTPUT);
+  pinMode(D9, OUTPUT);
+  pinMode(D10, OUTPUT);
+  //pinMode(9, OUTPUT);
+  //pinMode(26, OUTPUT);
+
+  lcd0.init();
+  lcd1.init();
+  lcd2.init();
+  lcd3.init();
+  lcd4.init();
   
   turnLcdOff(5);
 
   WiFi.mode(WIFI_STA);
   WiFiMulti.addAP("Pomodoro", "123123123");
-  
-  // allow reuse (if server supports it)
-  http.setReuse(true);
+
+  Serial.print("Connecting");
+  while (WiFiMulti.run() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print('.');
+  }
+
+  JsonArray& faces = getFaces();
+
+  activities[0] = faces.get<String>(0);
+  activities[1] = faces.get<String>(1);
+  activities[2] = faces.get<String>(2);
+  activities[3] = faces.get<String>(3);
+  activities[4] = faces.get<String>(4);
 }
  
 void loop(){
     readAccel();
     recorded = false;
-
-
-    //Serial.println("Side: " + String(side));
   
     //Serial.println("D0: " + String(digitalRead(D0)) + " D4: " + String(digitalRead(D4)) + " D5: " + String(digitalRead(D5)) + " D6: " + String(digitalRead(D6)) + " D7: " + String(digitalRead(D7)));
-    if( digitalRead(D0) != 1 || xAxis < -13000 ){
+    if( xAxis < -13000 ){
       if (side != 0) {
-        sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
         side = 0;
         turnLcdOff(side);
@@ -223,10 +268,31 @@ void loop(){
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
       lcd0.home();
-      lcd0.print("ATIVIDADE 0"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd0.print(activities[side]); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd0.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd0.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
-
+      
+      if (minutes == 0 && seconds == 0) {
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
+        delta[side] = 0;
+        
+        Serial.println("acende led");
+        digitalWrite(D10, HIGH);
+        
+        if(digitalRead(D0) == 1) {
+          while(digitalRead(D0) == 1) {
+            ESP.wdtDisable();
+            ESP.wdtEnable(1000);
+          }
+        }
+        
+        Serial.println("apaga led");
+        digitalWrite(D10, LOW);
+        
+        delay(1000);
+        startingMillis = millis();
+      }
+      
       long acquiringTime = millis();
       /*while(digitalRead(D0) != 1){
         ESP.wdtDisable();
@@ -243,23 +309,20 @@ void loop(){
       
       int frequency = (int)count*128.00*1000/((millis() - acquiringTime));
 
-      if(recorded) sendJSON(makeJSONAudio(side, _audio, frequency));
+      //if(recorded) sendJSON(makeJSONAudio(side, _audio, frequency));
        
       _audio = "";
       recorded = false;
 
       
-    } else if ( digitalRead(D4) != 1 || yAxis < -13000 ) {
+    } else if ( yAxis < -13000 ) {
       if (side != 1) {
-        sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
         side = 1;
         turnLcdOff(side);
       }
-
-      lcd1.init();
-      lcd1.display();   // INICIALIZA O DISPLAY LCD
-      lcd1.backlight();
+      
       long count = 0;
       if (millis() - startingMillis >= 1000 ) {
         delta[side] += millis() - startingMillis;
@@ -267,13 +330,38 @@ void loop(){
       }
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
+
+      lcd1.init();
+      lcd1.display();   // INICIALIZA O DISPLAY LCD
+      lcd1.backlight();
       lcd1.home();
-      lcd1.print("ATIVIDADE 1"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd1.print(activities[side]); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd1.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd1.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
+
+      if (minutes == 0 && seconds == 0) {
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
+        delta[side] = 0;
+        
+        Serial.println("acende led");
+        digitalWrite(D9, HIGH);
+        
+        if(digitalRead(D4) == 1) {
+          while(digitalRead(D4) == 1) {
+            ESP.wdtDisable();
+            ESP.wdtEnable(1000);
+          }
+        }
+        
+        Serial.println("apaga led");
+        digitalWrite(D9, LOW);
+        
+        delay(1000);
+        startingMillis = millis();
+      }
       
       long acquiringTime = millis();
-      /*while(digitalRead(D8) != 1){
+      /*while(digitalRead(D4) != 1){
         ESP.wdtDisable();
         
         for(byte i = 0; i < 128; i++) {
@@ -292,9 +380,9 @@ void loop(){
       _audio = "";
       recorded = false;
       
-    } else if ( digitalRead(D6) != 1 || yAxis > 13000 ) {
+    } else if ( yAxis > 13000 ) {
       if (side != 4) {
-        sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
         side = 4;
         turnLcdOff(side);
@@ -311,12 +399,33 @@ void loop(){
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
       lcd4.home();
-      lcd4.print("ATIVIDADE 4"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd4.print(activities[side]); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd4.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd4.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
+
+      if (minutes == 0 && seconds == 0) {
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
+        delta[side] = 0;
+        
+        Serial.println("acende led");
+        //digitalWrite(9, HIGH);
+        
+        if(digitalRead(D6) == 1) {
+          while(digitalRead(D6) == 1) {
+            ESP.wdtDisable();
+            ESP.wdtEnable(1000);
+          }
+        }
+        
+        Serial.println("apaga led");
+        //digitalWrite(9, LOW);
+        
+        delay(1000);
+        startingMillis = millis();
+      }
       
       long acquiringTime = millis();
-      /*while(digitalRead(D4) != 1){
+      /*while(digitalRead(D6) != 1){
         ESP.wdtDisable();
         
         for(byte i = 0; i < 128; i++) {
@@ -336,9 +445,9 @@ void loop(){
       _audio = "";
       recorded = false;
       
-    } else if ( digitalRead(D5) != 1 || zAxis > 13000 ) {
+    } else if ( zAxis > 13000 ) {
       if (side != 3) {
-        sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
         startingMillis = millis();  
         side = 3;
         turnLcdOff(side);
@@ -355,9 +464,30 @@ void loop(){
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
       lcd3.home();
-      lcd3.print("ATIVIDADE 3"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd3.print(activities[side]); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd3.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd3.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
+
+      if (minutes == 0 && seconds == 0) {
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
+        delta[side] = 0;
+        
+        Serial.println("acende led");
+        //digitalWrite(26, HIGH);
+        
+        if(digitalRead(D5) == 1) {
+          while(digitalRead(D5) == 1) {
+            ESP.wdtDisable();
+            ESP.wdtEnable(1000);
+          }
+        }
+        
+        Serial.println("apaga led");
+        //digitalWrite(26, LOW);
+        
+        delay(1000);
+        startingMillis = millis();
+      }
       
       long acquiringTime = millis();
       /*while(digitalRead(D5) != 1){
@@ -380,9 +510,9 @@ void loop(){
       _audio = "";
       recorded = false;
       
-    } else if ( digitalRead(D7) != 1 || zAxis < -13000 ) {
+    } else if ( zAxis < -13000 ) {
       if (side != 2) {
-        sendJSON(makeJSONActivity(side, delta[side]));
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
         startingMillis = millis(); 
         side = 2;
         turnLcdOff(side); 
@@ -399,9 +529,30 @@ void loop(){
       seconds = ((timer[side] - delta[side]) / 1000) % 60;
       minutes = (((timer[side] - delta[side]) / 1000) / 60) % 60;
       lcd2.home();
-      lcd2.print("ATIVIDADE 2"); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
+      lcd2.print(activities[side]); //ESCREVE O TEXTO NA PRIMEIRA LINHA DO DISPLAY LCD
       lcd2.setCursor(0, 1); //SETA A POSIÇÃO EM QUE O CURSOR RECEBE O TEXTO A SER MOSTRADO(LINHA 2)      
       lcd2.print(String(minutes) + ":" + String(seconds)); //ESCREVE O TEXTO NA SEGUNDA LINHA DO DISPLAY LCD
+
+      if (minutes == 0 && seconds == 0) {
+        sendJSONActivity(makeJSONActivity(side, delta[side]));
+        delta[side] = 0;
+        
+        Serial.println("acende led");
+        digitalWrite(D8, HIGH);
+        
+        if(digitalRead(D7) == 1) {
+          while(digitalRead(D7) == 1) {
+            ESP.wdtDisable();
+            ESP.wdtEnable(1000);
+          }
+        }
+        
+        Serial.println("apaga led");
+        digitalWrite(D8, LOW);
+        
+        delay(1000);
+        startingMillis = millis();
+      }
       
       long acquiringTime = millis();
       /*while(digitalRead(D7) != 1){
@@ -426,7 +577,7 @@ void loop(){
       
     } else if ( xAxis > 3000 ) {
       if (side != 5) {
-        sendJSON(makeJSONActivity(side, delta[side])); 
+        sendJSONActivity(makeJSONActivity(side, delta[side])); 
         side = 5;
         turnLcdOff(side);  
       } 
